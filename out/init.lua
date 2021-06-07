@@ -228,11 +228,8 @@ do
 		return callback(self:get(key))
 	end
 	function Attributes:andThenSync(key, callback)
-		local _0 = self:waitFor(key)
-		local _1 = function(value)
-			return callback(value)
-		end
-		_0:andThen(_1):await()
+		self:waitFor(key):await()
+		spawn(callback, self:get(key))
 	end
 	function Attributes:andThenAsync(key, callback)
 		local _0 = self:waitFor(key)
@@ -256,6 +253,9 @@ do
 		self.attributes = self:updateAttributes()
 	end
 	function Attributes:destroy()
+		self.disposables:Destroy()
+	end
+	function Attributes:Destroy()
 		self.disposables:Destroy()
 	end
 end

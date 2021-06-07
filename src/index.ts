@@ -16,7 +16,7 @@ function spawn<C extends Callback>(callback: C, ...args: Parameters<C>): void {
  * Attributes is a class where it handles Instance's attributes
  * with couple of perks and methods to make handling attributes a bit easier
  */
-class Attributes<T extends Record<string, unknown> = {}> {
+class Attributes<T extends object = {}> {
 	private bindable = new Instance("BindableEvent") as BindableEvent<(attribute: keyof T, value: unknown) => void>;
 	private disposables = new Janitor();
 	private instance: Instance;
@@ -264,9 +264,8 @@ class Attributes<T extends Record<string, unknown> = {}> {
 	 * @param callback
 	 */
 	andThenSync<K extends keyof T>(key: K, callback: (value: Readonly<T[K]>) => void): void {
-		this.waitFor(key)
-			.then((value) => callback(value))
-			.await();
+		this.waitFor(key).await();
+		spawn(callback, this.get(key));
 	}
 
 	/**
@@ -296,10 +295,33 @@ class Attributes<T extends Record<string, unknown> = {}> {
 
 	/**
 	 * Destroys the entire Attributes instance
+	 *
+	 * Use ``Destroy`` method in PascalCase if you're planning
+	 * to clean it up automatically like Janitor and Maid
+	 * @alias Destroy
 	 */
 	destroy(): void {
 		this.disposables.Destroy();
 	}
+
+	/**
+	 * Destroys the entire Attributes instance
+	 *
+	 * This method is meant for disposable cleaners like
+	 * Janitor and Maid, because they cannot know if Destroy method
+	 * is in PascalCase or camelCase
+	 *
+	 * This method has the same functionally as camelCase one
+	 * @alias destroy
+	 */
+	Destroy() {
+		this.disposables.Destroy();
+	}
+}
+
+interface that {
+	name: string;
+	age: number;
 }
 
 export = Attributes;

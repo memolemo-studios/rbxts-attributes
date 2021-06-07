@@ -1,10 +1,10 @@
-/// <reference types="@rbxts/compiler-types" />
 /// <reference types="@rbxts/types" />
+/// <reference types="@rbxts/compiler-types" />
 /**
  * Attributes is a class where it handles Instance's attributes
  * with couple of perks and methods to make handling attributes a bit easier
  */
-declare class Attributes<T extends Record<string, unknown> = {}> {
+declare class Attributes<T extends object = {}> {
     private bindable;
     private disposables;
     private instance;
@@ -126,7 +126,22 @@ declare class Attributes<T extends Record<string, unknown> = {}> {
     wipe(): void;
     /**
      * Destroys the entire Attributes instance
+     *
+     * Use ``Destroy`` method in PascalCase if you're planning
+     * to clean it up automatically like Janitor and Maid
+     * @alias Destroy
      */
     destroy(): void;
+    /**
+     * Destroys the entire Attributes instance
+     *
+     * This method is meant for disposable cleaners like
+     * Janitor and Maid, because they cannot know if Destroy method
+     * is in PascalCase or camelCase
+     *
+     * This method has the same functionally as camelCase one
+     * @alias destroy
+     */
+    Destroy(): void;
 }
 export = Attributes;
