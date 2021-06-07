@@ -319,9 +319,4 @@ class Attributes<T extends object = {}> {
 	}
 }
 
-interface that {
-	name: string;
-	age: number;
-}
-
 export = Attributes;
