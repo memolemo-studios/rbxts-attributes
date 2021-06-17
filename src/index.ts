@@ -1,10 +1,16 @@
 import { Janitor } from "@rbxts/janitor";
 
+/* Table stuff that rbxts doesn't support */
+declare const table: {
+	clear: (object: object) => void;
+};
+
+type ChangedAttributeCallback<T> = (attribute: keyof T, value: T[keyof T]) => void;
+type MapObject<T> = Map<keyof T, T[keyof T]>;
+
 const RunService = game.GetService("RunService");
 
-/**
- * Thread spawner
- */
+/// Utils ///
 function spawn<C extends Callback>(callback: C, ...args: Parameters<C>): void {
 	const bindable = new Instance("BindableEvent");
 	bindable.Event.Connect(() => callback(...(args as unknown[])));
@@ -12,90 +18,104 @@ function spawn<C extends Callback>(callback: C, ...args: Parameters<C>): void {
 	bindable.Destroy();
 }
 
+function copy<T extends object>(tbl: T): T {
+	const newTbl = {} as T;
+	for (const [index, value] of pairs(tbl)) {
+		if (typeIs(value, "table")) {
+			newTbl[index as keyof T] = value as unknown as T[keyof T];
+			continue;
+		}
+		newTbl[index as keyof T] = value as T[keyof T];
+	}
+	return newTbl;
+}
+
+/// Class ///
 /**
  * Attributes is a class where it handles Instance's attributes
  * with couple of perks and methods to make handling attributes a bit easier
  */
 class Attributes<T extends object = {}> {
-	private bindable = new Instance("BindableEvent") as BindableEvent<(attribute: keyof T, value: unknown) => void>;
-	private disposables = new Janitor();
-	private instance: Instance;
-	private attributes = new Map<keyof T, unknown>();
+	// Event and connection disposal
+	private _disposables = new Janitor();
+
+	// The entire map of attributes stored
+	private _attributes = new Map<keyof T, T[keyof T]>();
 
 	// Useful variable to avoid multiple updates in updateAttributes method
-	private isBusy = false;
+	private _isBusy = false;
+
+	// Event
+	private _bindable: BindableEvent<ChangedAttributeCallback<T>>;
+
+	// Instance of the class
+	private _instance: Instance;
 
 	/**
 	 * An event only invokes when attributes' map is updated
 	 *
 	 * **NOTE:** This is not going to invoke if instance's attributes are changed
 	 */
-	changed = this.bindable.Event;
+	changed: RBXScriptSignal<ChangedAttributeCallback<T>>;
 
 	constructor(instance: Instance) {
-		this.instance = instance;
-		this.attributes = this.updateAttributes();
+		this._instance = instance;
+		this._bindable = new Instance("BindableEvent");
+		this.changed = this._bindable.Event;
 
-		let connection: RBXScriptConnection;
-
-		// eslint-disable-next-line prefer-const
-		connection = this.instance.AttributeChanged.Connect(() => this.updateAttributes());
-
-		this.disposables.Add(this.bindable);
-		this.disposables.Add(connection);
+		this._disposables.Add(this._instance.AttributeChanged.Connect(() => this._reloadAllAttributes()));
 	}
 
-	private updateAttributes(): Map<keyof T, unknown> {
-		/* Making sure it is not busy (like nuking and stuff)  */
-		if (this.isBusy) {
-			return this.attributes;
-		}
+	private _reloadAllAttributes() {
+		/* Making sure it is not busy (critical stuff) */
+		if (this._isBusy) return;
 
-		const rawAttributes = this.instance.GetAttributes() as Map<keyof T, T[keyof T]>;
+		/* Get the entire attributes from instance */
+		const rawAttributes = this._instance.GetAttributes() as MapObject<T>;
 
 		/* Checking for any changes */
-		const changedValues = new Map<keyof T, unknown>();
-		rawAttributes.forEach((rawValue, rawKey) => {
-			const valueFromMap = this.attributes;
-			if (!valueFromMap.has(rawKey) || valueFromMap.get(rawKey) !== rawValue) {
-				changedValues.set(rawKey, rawValue);
+		rawAttributes.forEach((newValue, key) => {
+			const oldValue = this._attributes.get(key);
+			if (oldValue !== newValue) {
+				this._bindable.Fire(key, newValue);
 			}
 		});
 
 		/* Replacing attributes variable to new raw attributes map */
-		this.attributes = rawAttributes;
-
-		/* Then firing every changed attribute keys */
-		spawn(() => changedValues.forEach((value, key) => this.bindable.Fire(key, value)));
-
-		return rawAttributes;
-	}
-
-	/**
-	 * Gets all of the attributes
-	 *
-	 * **NOTE:** This method returns as a readonly attributes map
-	 */
-	getAll(): Readonly<T> {
-		const attributes = this.attributes;
-
-		setmetatable(attributes, {
-			__newindex: () => {
-				error("Modifying attributes are not allowed!", 2);
-			},
-
-			__metatable: false as unknown as string,
-		});
-
-		return attributes as unknown as Readonly<T>;
+		this._attributes = rawAttributes;
 	}
 
 	/**
 	 * Gets the value of desired attribute key
 	 * @param key
 	 */
-	get<K extends keyof T>(key: K): Readonly<T[K]> {
-		return this.attributes.get(key) as T[K];
+	get<K extends keyof T>(key: K): T[K] {
+		return this._attributes.get(key) as T[K];
+	}
+
+	/**
+	 * Gets the entire attributes stored internally on a Map object
+	 *
+	 * **NOTE:** This method returns as a readonly object
+	 * @returns Readonly attributes
+	 */
+	getAll(): Readonly<T> {
+		/* Copy the entire attributes (for security) */
+		const copiedAttributes = copy(this._attributes);
+
+		/* Locking it through metamethod */
+		setmetatable(copiedAttributes, {
+			__index: (_, index) => {
+				error("%s is not a valid attribute in %s".format(tostring(index), this._instance.GetFullName()));
+			},
+
+			__newindex: () => {
+				error("GetAll method returns readonly map!");
+			},
+		});
+
+		/* Returned */
+		return copiedAttributes as unknown as Readonly<T>;
 	}
 
 	/**
@@ -104,9 +124,9 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 * @param defaultValue
 	 */
-	getOr<K extends keyof T>(key: K, defaultValue: T[K]): Readonly<T[K]> {
-		const value = this.has(key) ? this.get(key) : defaultValue;
-		return value;
+	getOr<K extends keyof T>(key: K, defaultValue: T[K]) {
+		const valueFromKey = this.get(key);
+		return valueFromKey !== undefined ? valueFromKey : defaultValue;
 	}
 
 	/**
@@ -115,8 +135,8 @@ class Attributes<T extends object = {}> {
 	 * @param value
 	 */
 	set<K extends keyof T>(key: K, value: T[K]): void {
-		/* Setting an attribute to the real instance to automatically update it */
-		this.instance.SetAttribute(key as string, value);
+		/* Setting the attribute to the real attribute */
+		this._instance.SetAttribute(key as string, value);
 	}
 
 	/**
@@ -124,8 +144,9 @@ class Attributes<T extends object = {}> {
 	 * @param tree
 	 */
 	setMultiple(tree: Partial<T>): void {
-		const treeToMap = tree as unknown as Map<string, unknown>;
-		treeToMap.forEach((v, k) => this.instance.SetAttribute(k, v));
+		/* Convert this to map (so that typescript doesn't have conflicts with this) */
+		const treeToMap = tree as unknown as MapObject<T>;
+		treeToMap.forEach((value, key) => this.set(key, value));
 	}
 
 	/**
@@ -139,7 +160,7 @@ class Attributes<T extends object = {}> {
 		 *
 		 * 'Just like .set() method'
 		 */
-		this.instance.SetAttribute(key as string, undefined);
+		this._instance.SetAttribute(key as string, undefined);
 	}
 
 	/**
@@ -159,16 +180,13 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 */
 	observe<K extends keyof T>(key: K, callback: (value: T[K]) => void): RBXScriptConnection {
-		let connection: RBXScriptConnection;
-
-		// eslint-disable-next-line prefer-const
-		connection = this.changed.Connect((attribute, newValue) => {
-			if ((key as unknown as K) === (attribute as unknown as K)) {
-				callback(newValue as unknown as T[K]);
+		const connection = this.changed.Connect((attribute, newValue) => {
+			if (attribute === key) {
+				callback(newValue as T[K]);
 			}
 		});
 
-		this.disposables.Add(connection);
+		this._disposables.Add(connection);
 		return connection;
 	}
 
@@ -178,25 +196,26 @@ class Attributes<T extends object = {}> {
 	 */
 	waitFor<K extends keyof T>(key: K): Promise<T[K]> {
 		let value = this.get(key);
-		if (this.has(key)) {
-			return Promise.resolve<T[K]>(value as T[K]);
+		if (value !== undefined) {
+			return Promise.resolve<T[K]>(value);
 		}
 
-		const currentPromise = new Promise<T[K]>((resolve, _, onCancel) => {
-			const promiseDisposables = new Janitor();
-			promiseDisposables.Add(
-				RunService.RenderStepped.Connect(() => {
+		const waitForPromise = new Promise<T[K]>((resolve, _, onCancel) => {
+			const promiseDisposal = new Janitor();
+			promiseDisposal.Add(
+				RunService.Heartbeat.Connect(() => {
 					value = this.get(key);
-					if (this.has(key)) {
-						resolve(value as T[K]);
+					if (value !== undefined) {
+						resolve(value);
 					}
 				}),
 			);
-			onCancel(() => promiseDisposables.Destroy());
+
+			onCancel(() => promiseDisposal.Destroy());
 		});
 
-		this.disposables.AddPromise(currentPromise);
-		return currentPromise;
+		this._disposables.AddPromise(waitForPromise);
+		return waitForPromise;
 	}
 
 	/**
@@ -206,9 +225,12 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 */
 	toggle<K extends keyof T>(key: K): void {
-		const value = this.attributes.get(key);
+		const value = this._attributes.get(key);
 
-		assert(typeIs(value, "boolean"), "%s is not a boolean attribute".format(tostring(key)));
+		assert(
+			typeIs(value, "boolean"),
+			"%s is not a boolean attribute in %s".format(tostring(key), this._instance.GetFullName()),
+		);
 		this.set(key, !value as unknown as T[K]);
 	}
 
@@ -220,7 +242,7 @@ class Attributes<T extends object = {}> {
 	 * @param delta optional
 	 */
 	increment<K extends keyof T>(key: K, delta?: number): void {
-		const value = this.attributes.get(key);
+		const value = this._attributes.get(key);
 		assert(typeIs(value, "number"), "%s is not a number attribute".format(tostring(key)));
 
 		const finalDelta = typeIs(delta, "number") ? delta : 1;
@@ -235,22 +257,20 @@ class Attributes<T extends object = {}> {
 	 * @param delta optional
 	 */
 	decrement<K extends keyof T>(key: K, delta?: number): void {
-		const value = this.attributes.get(key);
-		assert(typeIs(value, "number"), "%s is not a number attribute".format(tostring(key)));
-
-		const finalDelta = typeIs(delta, "number") ? delta : 1;
-		this.increment(key, finalDelta);
+		/* Lazy method */
+		this.increment(key, typeIs(delta, "number") ? -delta : -1);
 	}
 
 	/**
 	 * A useful method gets the attribute's value and
-	 * adjusts it to the programmer's choice
+	 * adjusts it to the everyone's choice
 	 *
-	 * **This method supports undefined values**
+	 * **This method accepts undefined values however
+	 * it is not neccessary**
 	 * @param key
 	 * @param callback
 	 */
-	map<K extends keyof T, V = undefined>(key: K, callback: (value: Readonly<T[K]>) => V): V {
+	map<K extends keyof T, V = void>(key: K, callback: (value: Readonly<T[K]>) => V): V {
 		return callback(this.get(key));
 	}
 
@@ -263,34 +283,22 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 * @param callback
 	 */
-	andThenSync<K extends keyof T>(key: K, callback: (value: Readonly<T[K]>) => void): void {
-		this.waitFor(key).await();
-		spawn(callback, this.get(key));
-	}
-
-	/**
-	 * A useful method that allows to run in a callback parameter
-	 * if desired attribute's value is not nil or undefined
-	 *
-	 * **This is an asynchronous method, if you want synchronous method then
-	 * use ``andThenSync`` instead**
-	 * @param key
-	 * @param callback
-	 */
-	andThenAsync<K extends keyof T>(key: K, callback: (value: Readonly<T[K]>) => void): void {
-		this.waitFor(key).then((value) => callback(value));
+	andThen<K extends keyof T>(key: K, callback: (value: T[K]) => void): void {
+		const value = this.get(key);
+		if (value !== undefined) {
+			spawn(() => callback(value));
+		}
 	}
 
 	/**
 	 * Wipes the entire attributes
 	 */
 	wipe(): void {
-		this.isBusy = true;
+		this._isBusy = true;
+		this._attributes.forEach((_, key) => this.delete(key));
+		this._isBusy = false;
 
-		this.attributes.forEach((_, key) => this.delete(key));
-
-		this.isBusy = false;
-		this.attributes = this.updateAttributes();
+		this._reloadAllAttributes();
 	}
 
 	/**
@@ -301,7 +309,13 @@ class Attributes<T extends object = {}> {
 	 * @alias Destroy
 	 */
 	destroy(): void {
-		this.disposables.Destroy();
+		this._disposables.Destroy();
+		table.clear(this);
+		setmetatable(this, {
+			__index: () => error("This attributes instance is already destroyed!"),
+			__newindex: () => error("Cannot modify destroyed attributes"),
+			__metatable: undefined as unknown as string,
+		});
 	}
 
 	/**
@@ -312,10 +326,10 @@ class Attributes<T extends object = {}> {
 	 * is in PascalCase or camelCase
 	 *
 	 * This method has the same functionally as camelCase one
-	 * @alias destroy
+	 * @alias Destroy
 	 */
 	Destroy() {
-		this.disposables.Destroy();
+		this.destroy();
 	}
 }
 

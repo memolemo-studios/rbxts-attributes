@@ -1,11 +1,9 @@
 -- Compiled with roblox-ts v1.1.1
 local TS = _G[script]
 local Janitor = TS.import(script, TS.getModule(script, "janitor").src).Janitor
+-- Table stuff that rbxts doesn't support
 local RunService = game:GetService("RunService")
---[[
-	*
-	* Thread spawner
-]]
+-- / Utils ///
 local function spawn(callback, ...)
 	local args = { ... }
 	local bindable = Instance.new("BindableEvent")
@@ -15,6 +13,19 @@ local function spawn(callback, ...)
 	bindable:Fire()
 	bindable:Destroy()
 end
+local function copy(tbl)
+	local newTbl = {}
+	for index, value in pairs(tbl) do
+		local _0 = value
+		if type(_0) == "table" then
+			newTbl[index] = value
+			continue
+		end
+		newTbl[index] = value
+	end
+	return newTbl
+end
+-- / Class ///
 --[[
 	*
 	* Attributes is a class where it handles Instance's attributes
@@ -34,47 +45,31 @@ do
 		return self
 	end
 	function Attributes:constructor(instance)
-		self.bindable = Instance.new("BindableEvent")
-		self.disposables = Janitor.new()
-		self.attributes = {}
-		self.isBusy = false
-		self.changed = self.bindable.Event
-		self.instance = instance
-		self.attributes = self:updateAttributes()
-		local connection
-		-- eslint-disable-next-line prefer-const
-		connection = self.instance.AttributeChanged:Connect(function()
-			return self:updateAttributes()
-		end)
-		self.disposables:Add(self.bindable)
-		self.disposables:Add(connection)
+		self._disposables = Janitor.new()
+		self._attributes = {}
+		self._isBusy = false
+		self._instance = instance
+		self._bindable = Instance.new("BindableEvent")
+		self.changed = self._bindable.Event
+		self._disposables:Add(self._instance.AttributeChanged:Connect(function()
+			return self:_reloadAllAttributes()
+		end))
 	end
-	function Attributes:updateAttributes()
-		-- Making sure it is not busy (like nuking and stuff)
-		if self.isBusy then
-			return self.attributes
+	function Attributes:_reloadAllAttributes()
+		-- Making sure it is not busy (critical stuff)
+		if self._isBusy then
+			return nil
 		end
-		local rawAttributes = self.instance:GetAttributes()
+		-- Get the entire attributes from instance
+		local rawAttributes = self._instance:GetAttributes()
 		-- Checking for any changes
-		local changedValues = {}
 		local _0 = rawAttributes
-		local _1 = function(rawValue, rawKey)
-			local valueFromMap = self.attributes
-			local _2 = valueFromMap
-			local _3 = rawKey
-			local _4 = not (_2[_3] ~= nil)
-			if not _4 then
-				local _5 = valueFromMap
-				local _6 = rawKey
-				_4 = _5[_6] ~= rawValue
-			end
-			if _4 then
-				local _5 = changedValues
-				local _6 = rawKey
-				local _7 = rawValue
-				-- ▼ Map.set ▼
-				_5[_6] = _7
-				-- ▲ Map.set ▲
+		local _1 = function(newValue, key)
+			local _2 = self._attributes
+			local _3 = key
+			local oldValue = _2[_3]
+			if oldValue ~= newValue then
+				self._bindable:Fire(key, newValue)
 			end
 		end
 		-- ▼ ReadonlyMap.forEach ▼
@@ -83,56 +78,50 @@ do
 		end
 		-- ▲ ReadonlyMap.forEach ▲
 		-- Replacing attributes variable to new raw attributes map
-		self.attributes = rawAttributes
-		-- Then firing every changed attribute keys
-		spawn(function()
-			local _2 = changedValues
-			local _3 = function(value, key)
-				return self.bindable:Fire(key, value)
-			end
-			-- ▼ ReadonlyMap.forEach ▼
-			for _4, _5 in pairs(_2) do
-				_3(_5, _4, _2)
-			end
-			-- ▲ ReadonlyMap.forEach ▲
-			return nil
-		end)
-		return rawAttributes
-	end
-	function Attributes:getAll()
-		local attributes = self.attributes
-		setmetatable(attributes, {
-			__newindex = function()
-				error("Modifying attributes are not allowed!", 2)
-			end,
-			__metatable = false,
-		})
-		return attributes
+		self._attributes = rawAttributes
 	end
 	function Attributes:get(key)
-		local _0 = self.attributes
+		local _0 = self._attributes
 		local _1 = key
 		return _0[_1]
 	end
+	function Attributes:getAll()
+		-- Copy the entire attributes (for security)
+		local copiedAttributes = copy(self._attributes)
+		-- Locking it through metamethod
+		setmetatable(copiedAttributes, {
+			__index = function(_, index)
+				local _0 = tostring(index)
+				local _1 = self._instance:GetFullName()
+				error(string.format("%s is not a valid attribute in %s", _0, _1))
+			end,
+			__newindex = function()
+				error("GetAll method returns readonly map!")
+			end,
+		})
+		-- Returned
+		return copiedAttributes
+	end
 	function Attributes:getOr(key, defaultValue)
+		local valueFromKey = self:get(key)
 		local _0
-		if self:has(key) then
-			_0 = self:get(key)
+		if valueFromKey ~= nil then
+			_0 = valueFromKey
 		else
 			_0 = defaultValue
 		end
-		local value = _0
-		return value
+		return _0
 	end
 	function Attributes:set(key, value)
-		-- Setting an attribute to the real instance to automatically update it
-		self.instance:SetAttribute(key, value)
+		-- Setting the attribute to the real attribute
+		self._instance:SetAttribute(key, value)
 	end
 	function Attributes:setMultiple(tree)
+		-- Convert this to map (so that typescript doesn't have conflicts with this)
 		local treeToMap = tree
 		local _0 = treeToMap
-		local _1 = function(v, k)
-			return self.instance:SetAttribute(k, v)
+		local _1 = function(value, key)
+			return self:set(key, value)
 		end
 		-- ▼ ReadonlyMap.forEach ▼
 		for _2, _3 in pairs(_0) do
@@ -148,7 +137,7 @@ do
 			*
 			* 'Just like .set() method'
 		]]
-		self.instance:SetAttribute(key, nil)
+		self._instance:SetAttribute(key, nil)
 	end
 	function Attributes:has(key)
 		if self:get(key) == nil then
@@ -157,49 +146,48 @@ do
 		return true
 	end
 	function Attributes:observe(key, callback)
-		local connection
-		-- eslint-disable-next-line prefer-const
-		connection = self.changed:Connect(function(attribute, newValue)
-			if key == attribute then
+		local connection = self.changed:Connect(function(attribute, newValue)
+			if attribute == key then
 				callback(newValue)
 			end
 		end)
-		self.disposables:Add(connection)
+		self._disposables:Add(connection)
 		return connection
 	end
 	function Attributes:waitFor(key)
 		local value = self:get(key)
-		if self:has(key) then
+		if value ~= nil then
 			return TS.Promise.resolve(value)
 		end
-		local currentPromise = TS.Promise.new(function(resolve, _, onCancel)
-			local promiseDisposables = Janitor.new()
-			promiseDisposables:Add(RunService.RenderStepped:Connect(function()
+		local waitForPromise = TS.Promise.new(function(resolve, _, onCancel)
+			local promiseDisposal = Janitor.new()
+			promiseDisposal:Add(RunService.Heartbeat:Connect(function()
 				value = self:get(key)
-				if self:has(key) then
+				if value ~= nil then
 					resolve(value)
 				end
 			end))
 			onCancel(function()
-				return promiseDisposables:Destroy()
+				return promiseDisposal:Destroy()
 			end)
 		end)
-		self.disposables:AddPromise(currentPromise)
-		return currentPromise
+		self._disposables:AddPromise(waitForPromise)
+		return waitForPromise
 	end
 	function Attributes:toggle(key)
-		local _0 = self.attributes
+		local _0 = self._attributes
 		local _1 = key
 		local value = _0[_1]
 		local _2 = value
 		local _3 = type(_2) == "boolean"
 		local _4 = tostring(key)
-		local _5 = string.format("%s is not a boolean attribute", _4)
-		assert(_3, _5)
+		local _5 = self._instance:GetFullName()
+		local _6 = string.format("%s is not a boolean attribute in %s", _4, _5)
+		assert(_3, _6)
 		self:set(key, not value)
 	end
 	function Attributes:increment(key, delta)
-		local _0 = self.attributes
+		local _0 = self._attributes
 		local _1 = key
 		local value = _0[_1]
 		local _2 = value
@@ -212,35 +200,25 @@ do
 		self:set(key, (value + finalDelta))
 	end
 	function Attributes:decrement(key, delta)
-		local _0 = self.attributes
-		local _1 = key
-		local value = _0[_1]
-		local _2 = value
-		local _3 = type(_2) == "number"
-		local _4 = tostring(key)
-		local _5 = string.format("%s is not a number attribute", _4)
-		assert(_3, _5)
-		local _6 = delta
-		local finalDelta = type(_6) == "number" and delta or 1
-		self:increment(key, finalDelta)
+		-- Lazy method
+		local _0 = self
+		local _1 = delta
+		_0:increment(key, type(_1) == "number" and -delta or -1)
 	end
 	function Attributes:map(key, callback)
 		return callback(self:get(key))
 	end
-	function Attributes:andThenSync(key, callback)
-		self:waitFor(key):await()
-		spawn(callback, self:get(key))
-	end
-	function Attributes:andThenAsync(key, callback)
-		local _0 = self:waitFor(key)
-		local _1 = function(value)
-			return callback(value)
+	function Attributes:andThen(key, callback)
+		local value = self:get(key)
+		if value ~= nil then
+			spawn(function()
+				return callback(value)
+			end)
 		end
-		_0:andThen(_1)
 	end
 	function Attributes:wipe()
-		self.isBusy = true
-		local _0 = self.attributes
+		self._isBusy = true
+		local _0 = self._attributes
 		local _1 = function(_, key)
 			return self:delete(key)
 		end
@@ -249,14 +227,24 @@ do
 			_1(_3, _2, _0)
 		end
 		-- ▲ ReadonlyMap.forEach ▲
-		self.isBusy = false
-		self.attributes = self:updateAttributes()
+		self._isBusy = false
+		self:_reloadAllAttributes()
 	end
 	function Attributes:destroy()
-		self.disposables:Destroy()
+		self._disposables:Destroy()
+		table.clear(self)
+		setmetatable(self, {
+			__index = function()
+				return error("This attributes instance is already destroyed!")
+			end,
+			__newindex = function()
+				return error("Cannot modify destroyed attributes")
+			end,
+			__metatable = nil,
+		})
 	end
 	function Attributes:Destroy()
-		self.disposables:Destroy()
+		self:destroy()
 	end
 end
 return Attributes

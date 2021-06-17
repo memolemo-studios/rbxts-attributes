@@ -1,41 +1,43 @@
 /// <reference types="@rbxts/types" />
 /// <reference types="@rbxts/compiler-types" />
+declare type ChangedAttributeCallback<T> = (attribute: keyof T, value: T[keyof T]) => void;
 /**
  * Attributes is a class where it handles Instance's attributes
  * with couple of perks and methods to make handling attributes a bit easier
  */
 declare class Attributes<T extends object = {}> {
-    private bindable;
-    private disposables;
-    private instance;
-    private attributes;
-    private isBusy;
+    private _disposables;
+    private _attributes;
+    private _isBusy;
+    private _bindable;
+    private _instance;
     /**
      * An event only invokes when attributes' map is updated
      *
      * **NOTE:** This is not going to invoke if instance's attributes are changed
      */
-    changed: RBXScriptSignal<(attribute: keyof T, value: unknown) => void>;
+    changed: RBXScriptSignal<ChangedAttributeCallback<T>>;
     constructor(instance: Instance);
-    private updateAttributes;
-    /**
-     * Gets all of the attributes
-     *
-     * **NOTE:** This method returns as a readonly attributes map
-     */
-    getAll(): Readonly<T>;
+    private _reloadAllAttributes;
     /**
      * Gets the value of desired attribute key
      * @param key
      */
-    get<K extends keyof T>(key: K): Readonly<T[K]>;
+    get<K extends keyof T>(key: K): T[K];
+    /**
+     * Gets the entire attributes stored internally on a Map object
+     *
+     * **NOTE:** This method returns as a readonly object
+     * @returns Readonly attributes
+     */
+    getAll(): Readonly<T>;
     /**
      * Gets the value or another value from the paramter
      * of desired attribute key
      * @param key
      * @param defaultValue
      */
-    getOr<K extends keyof T>(key: K, defaultValue: T[K]): Readonly<T[K]>;
+    getOr<K extends keyof T>(key: K, defaultValue: T[K]): T[K];
     /**
      * Sets the value of desired attribute key
      * @param key
@@ -93,13 +95,14 @@ declare class Attributes<T extends object = {}> {
     decrement<K extends keyof T>(key: K, delta?: number): void;
     /**
      * A useful method gets the attribute's value and
-     * adjusts it to the programmer's choice
+     * adjusts it to the everyone's choice
      *
-     * **This method supports undefined values**
+     * **This method accepts undefined values however
+     * it is not neccessary**
      * @param key
      * @param callback
      */
-    map<K extends keyof T, V = undefined>(key: K, callback: (value: Readonly<T[K]>) => V): V;
+    map<K extends keyof T, V = void>(key: K, callback: (value: Readonly<T[K]>) => V): V;
     /**
      * A useful method that allows to run in a callback parameter
      * if desired attribute's value is not nil or undefined
@@ -109,17 +112,7 @@ declare class Attributes<T extends object = {}> {
      * @param key
      * @param callback
      */
-    andThenSync<K extends keyof T>(key: K, callback: (value: Readonly<T[K]>) => void): void;
-    /**
-     * A useful method that allows to run in a callback parameter
-     * if desired attribute's value is not nil or undefined
-     *
-     * **This is an asynchronous method, if you want synchronous method then
-     * use ``andThenSync`` instead**
-     * @param key
-     * @param callback
-     */
-    andThenAsync<K extends keyof T>(key: K, callback: (value: Readonly<T[K]>) => void): void;
+    andThen<K extends keyof T>(key: K, callback: (value: T[K]) => void): void;
     /**
      * Wipes the entire attributes
      */
@@ -140,7 +133,7 @@ declare class Attributes<T extends object = {}> {
      * is in PascalCase or camelCase
      *
      * This method has the same functionally as camelCase one
-     * @alias destroy
+     * @alias Destroy
      */
     Destroy(): void;
 }
