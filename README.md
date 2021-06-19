@@ -28,7 +28,7 @@ humanoid.Died.Connect(() => robotAttribs.destroy());
 
 ## Installation
 
-**This package is now standalone!**
+**This package is requires @rbxts/janitor!**
 
 This is going to be a temporary installation. Coming soon, you can
 install this module with @rbxts/attributes.
