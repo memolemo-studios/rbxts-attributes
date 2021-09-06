@@ -111,22 +111,25 @@ class Attributes<T extends object = {}> {
 	 * Expects an attribute to have an exact type
 	 * @param key
 	 */
-	expectType<K extends keyof T>(key: K, type: CheckableTypeParameter) {
+	expectType<K extends keyof T>(key: K, typeParam: CheckableTypeParameter) {
 		const value = this.get(key);
 		const valueTypeOf = typeOf(value);
-		if (typeIs(type, "string")) {
-			if (valueTypeOf !== type) {
-				throwErrorInstanceMessage(this._instance, `expects '${key}' typeof '${type}' but it is ${valueTypeOf}`);
+		if (typeIs(typeParam, "string")) {
+			if (valueTypeOf !== typeParam) {
+				throwErrorInstanceMessage(
+					this._instance,
+					`expects '${key}' typeof '${typeParam}' but it is ${valueTypeOf}`,
+				);
 			}
 		} else {
-			for (const expected of type) {
+			for (const expected of typeParam) {
 				if (valueTypeOf === expected) {
 					return;
 				}
 			}
 			throwErrorInstanceMessage(
 				this._instance,
-				`expects '${key}' typeof '${type.map(v => `${v} or`)}' but it is ${valueTypeOf}`,
+				`expects '${key}' typeof '${typeParam.map(v => `${v} or`)}' but it is ${valueTypeOf}`,
 			);
 		}
 	}
