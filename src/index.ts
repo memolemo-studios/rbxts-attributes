@@ -7,15 +7,13 @@ declare const table: {
 
 type ChangedAttributeCallback<T> = (attribute: keyof T, value: T[keyof T]) => void;
 type MapObject<T> = Map<keyof T, T[keyof T]>;
+type CheckableTypeParameter = keyof CheckableTypes | (keyof CheckableTypes)[];
 
 const RunService = game.GetService("RunService");
 
 /// Utils ///
-function spawn<C extends Callback>(callback: C, ...args: Parameters<C>): void {
-	const bindable = new Instance("BindableEvent");
-	bindable.Event.Connect(() => callback(...(args as unknown[])));
-	bindable.Fire();
-	bindable.Destroy();
+function throwErrorInstanceMessage(instance: Instance, message: string) {
+	throw `${instance.GetFullName()} ${message}`;
 }
 
 function copy<T extends object>(tbl: T): T {
@@ -63,6 +61,8 @@ class Attributes<T extends object = {}> {
 		this._bindable = new Instance("BindableEvent");
 		this.changed = this._bindable.Event;
 
+		// load attributes upon instantiating
+		this._reloadAllAttributes();
 		this._disposables.Add(this._instance.AttributeChanged.Connect(() => this._reloadAllAttributes()));
 	}
 
@@ -83,6 +83,66 @@ class Attributes<T extends object = {}> {
 
 		/* Replacing attributes variable to new raw attributes map */
 		this._attributes = rawAttributes;
+	}
+
+	/**
+	 * Automatically sets default attribute values
+	 */
+	default(attributes: { [K in keyof T]?: T[K] }) {
+		for (const [key, value] of pairs(attributes)) {
+			if (!this.has(key as keyof T)) {
+				this.set(key as keyof T, value as T[keyof T]);
+			}
+		}
+	}
+
+	/**
+	 * Expects an attribute to have contents on it
+	 * @param key
+	 */
+	expect<K extends keyof T>(key: K) {
+		const value = this.get(key);
+		if (value === undefined) {
+			throwErrorInstanceMessage(this._instance, `needs '${key}' attribute to have a value`);
+		}
+	}
+
+	/**
+	 * Expects an attribute to have an exact type
+	 * @param key
+	 */
+	expectType<K extends keyof T>(key: K, type: CheckableTypeParameter) {
+		const value = this.get(key);
+		const valueTypeOf = typeOf(value);
+		if (typeIs(type, "string")) {
+			if (valueTypeOf !== type) {
+				throwErrorInstanceMessage(this._instance, `expects '${key}' typeof '${type}' but it is ${valueTypeOf}`);
+			}
+		} else {
+			for (const expected of type) {
+				if (valueTypeOf === expected) {
+					return;
+				}
+			}
+			throwErrorInstanceMessage(
+				this._instance,
+				`expects '${key}' typeof '${type.map(v => `${v} or`)}' but it is ${valueTypeOf}`,
+			);
+		}
+	}
+
+	/**
+	 * Expects attributes to have an exact type but it is a map
+	 * @param key
+	 */
+	expectMultiple(
+		attributes: {
+			[K in keyof T]?: CheckableTypeParameter;
+		},
+	) {
+		for (const [key, typeOfs] of pairs(attributes)) {
+			this.expectType(key as keyof T, typeOfs as CheckableTypeParameter);
+		}
 	}
 
 	/**
@@ -286,7 +346,7 @@ class Attributes<T extends object = {}> {
 	andThen<K extends keyof T>(key: K, callback: (value: T[K]) => void): void {
 		const value = this.get(key);
 		if (value !== undefined) {
-			spawn(() => callback(value));
+			task.spawn(() => callback(value));
 		}
 	}
 
