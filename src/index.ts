@@ -169,21 +169,7 @@ class Attributes<T extends object = {}> {
 	 */
 	getAll() {
 		/* Copy the entire attributes (for security) */
-		const copiedAttributes = copy(this._attributes);
-
-		/* Locking it through metamethod */
-		setmetatable(copiedAttributes, {
-			__index: (_, index) => {
-				error("%s is not a valid attribute in %s".format(tostring(index), this._instance.GetFullName()));
-			},
-
-			__newindex: () => {
-				error("GetAll method returns readonly map!");
-			},
-		});
-
-		/* Returned */
-		return copiedAttributes as unknown as Partial<Readonly<T>>;
+		return copy(this._attributes) as unknown as Partial<Readonly<T>>;
 	}
 
 	/**
