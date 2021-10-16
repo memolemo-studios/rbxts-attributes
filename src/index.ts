@@ -8,6 +8,9 @@ declare const table: {
 type ChangedAttributeCallback<T> = (attribute: keyof T, value: T[keyof T]) => void;
 type MapObject<T> = Map<keyof T, T[keyof T]>;
 type CheckableTypeParameter = keyof CheckableTypes | (keyof CheckableTypes)[];
+type NonNullableObject<T extends object> = {
+	[K in keyof T]: T[K] extends object ? NonNullableObject<T[K]> : NonNullable<T[K]>;
+};
 
 const RunService = game.GetService("RunService");
 
@@ -88,10 +91,11 @@ class Attributes<T extends object = {}> {
 	/**
 	 * Automatically sets default attribute values
 	 */
-	default(attributes: { [K in keyof T]?: T[K] }) {
+	default(attributes: { [K in keyof T]?: NonNullable<T[K]> }) {
+		// eslint-disable-next-line roblox-ts/no-array-pairs
 		for (const [key, value] of pairs(attributes)) {
 			if (!this.has(key as keyof T)) {
-				this.set(key as keyof T, value as T[keyof T]);
+				this.set(key as keyof T, value as NonNullable<T[keyof T]>);
 			}
 		}
 	}
@@ -143,6 +147,7 @@ class Attributes<T extends object = {}> {
 			[K in keyof T]?: CheckableTypeParameter;
 		},
 	) {
+		// eslint-disable-next-line roblox-ts/no-array-pairs
 		for (const [key, typeOfs] of pairs(attributes)) {
 			this.expectType(key as keyof T, typeOfs as CheckableTypeParameter);
 		}
@@ -152,8 +157,8 @@ class Attributes<T extends object = {}> {
 	 * Gets the value of desired attribute key
 	 * @param key
 	 */
-	get<K extends keyof T>(key: K): T[K] {
-		return this._attributes.get(key) as T[K];
+	get<K extends keyof T>(key: K) {
+		return this._attributes.get(key) as T[K] | undefined;
 	}
 
 	/**
@@ -162,7 +167,7 @@ class Attributes<T extends object = {}> {
 	 * **NOTE:** This method returns as a readonly object
 	 * @returns Readonly attributes
 	 */
-	getAll(): Readonly<T> {
+	getAll() {
 		/* Copy the entire attributes (for security) */
 		const copiedAttributes = copy(this._attributes);
 
@@ -178,7 +183,7 @@ class Attributes<T extends object = {}> {
 		});
 
 		/* Returned */
-		return copiedAttributes as unknown as Readonly<T>;
+		return copiedAttributes as unknown as Partial<Readonly<T>>;
 	}
 
 	/**
@@ -187,7 +192,7 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 * @param defaultValue
 	 */
-	getOr<K extends keyof T>(key: K, defaultValue: T[K]) {
+	getOr<K extends keyof T>(key: K, defaultValue: NonNullable<T[K]>) {
 		const valueFromKey = this.get(key);
 		return valueFromKey !== undefined ? valueFromKey : defaultValue;
 	}
@@ -197,7 +202,7 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 * @param value
 	 */
-	set<K extends keyof T>(key: K, value: T[K]): void {
+	set<K extends keyof T>(key: K, value: NonNullable<T[K]>): void {
 		/* Setting the attribute to the real attribute */
 		this._instance.SetAttribute(key as string, value);
 	}
@@ -206,10 +211,10 @@ class Attributes<T extends object = {}> {
 	 * Sets the values of desired attribute keys
 	 * @param tree
 	 */
-	setMultiple(tree: Partial<T>): void {
+	setMultiple(tree: Partial<NonNullableObject<T>>): void {
 		/* Convert this to map (so that typescript doesn't have conflicts with this) */
 		const treeToMap = tree as unknown as MapObject<T>;
-		treeToMap.forEach((value, key) => this.set(key, value));
+		treeToMap.forEach((value, key) => this.set(key, value as NonNullable<T[keyof T]>));
 	}
 
 	/**
@@ -242,10 +247,10 @@ class Attributes<T extends object = {}> {
 	 * Observes every change in a specific attribute key
 	 * @param key
 	 */
-	observe<K extends keyof T>(key: K, callback: (value: T[K]) => void): RBXScriptConnection {
+	observe<K extends keyof T>(key: K, callback: (value: NonNullable<T[K]>) => void): RBXScriptConnection {
 		const connection = this.changed.Connect((attribute, newValue) => {
 			if (attribute === key) {
-				callback(newValue as T[K]);
+				callback(newValue as NonNullable<T[K]>);
 			}
 		});
 
@@ -257,19 +262,19 @@ class Attributes<T extends object = {}> {
 	 * Waits for a specific attribute key to be non-undefined or non-nil value
 	 * @param key
 	 */
-	waitFor<K extends keyof T>(key: K): Promise<T[K]> {
+	waitFor<K extends keyof T>(key: K): Promise<NonNullable<T[K]>> {
 		let value = this.get(key);
 		if (value !== undefined) {
-			return Promise.resolve<T[K]>(value);
+			return Promise.resolve<NonNullable<T[K]>>(value as NonNullable<T[K]>);
 		}
 
-		const waitForPromise = new Promise<T[K]>((resolve, _, onCancel) => {
+		const waitForPromise = new Promise<NonNullable<T[K]>>((resolve, _, onCancel) => {
 			const promiseDisposal = new Janitor();
 			promiseDisposal.Add(
 				RunService.Heartbeat.Connect(() => {
 					value = this.get(key);
 					if (value !== undefined) {
-						resolve(value);
+						resolve(value as NonNullable<T[K]>);
 					}
 				}),
 			);
@@ -289,12 +294,11 @@ class Attributes<T extends object = {}> {
 	 */
 	toggle<K extends keyof T>(key: K): void {
 		const value = this._attributes.get(key);
-
 		assert(
 			typeIs(value, "boolean"),
 			"%s is not a boolean attribute in %s".format(tostring(key), this._instance.GetFullName()),
 		);
-		this.set(key, !value as unknown as T[K]);
+		this.set(key, !value as unknown as NonNullable<T[K]>);
 	}
 
 	/**
@@ -309,7 +313,7 @@ class Attributes<T extends object = {}> {
 		assert(typeIs(value, "number"), "%s is not a number attribute".format(tostring(key)));
 
 		const finalDelta = typeIs(delta, "number") ? delta : 1;
-		this.set(key, (value + finalDelta) as unknown as T[K]);
+		this.set(key, (value + finalDelta) as unknown as NonNullable<T[K]>);
 	}
 
 	/**
@@ -333,7 +337,7 @@ class Attributes<T extends object = {}> {
 	 * @param key
 	 * @param callback
 	 */
-	map<K extends keyof T, V = void>(key: K, callback: (value: Readonly<T[K]>) => V): V {
+	map<K extends keyof T, V = void>(key: K, callback: (value: T[K] | undefined) => V): V {
 		return callback(this.get(key));
 	}
 
